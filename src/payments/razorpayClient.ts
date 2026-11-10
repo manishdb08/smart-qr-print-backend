@@ -51,7 +51,12 @@ export async function createRazorpayOrderOnGateway(params: {
   notes?: Record<string, string>;
 }): Promise<{ id: string; amount: number; currency: string; receipt: string; status: string }> {
   // Mock fallback for unit/integration tests or development without live Razorpay keys
-  if (config.NODE_ENV === 'test' || config.RAZORPAY_KEY_ID.includes('mock')) {
+  if (
+    config.NODE_ENV === 'test' ||
+    config.RAZORPAY_KEY_ID.includes('mock') ||
+    config.RAZORPAY_KEY_ID.includes('YourTestKeyId') ||
+    config.RAZORPAY_KEY_SECRET.includes('your_test')
+  ) {
     const mockOrderId = `order_${crypto.randomBytes(8).toString('hex')}`;
     return {
       id: mockOrderId,
@@ -80,7 +85,12 @@ export async function createRazorpayOrderOnGateway(params: {
 }
 
 export async function processRazorpayRefund(paymentId: string, amountPaise?: number) {
-  if (config.NODE_ENV === 'test' || config.RAZORPAY_KEY_ID.includes('mock')) {
+  if (
+    config.NODE_ENV === 'test' ||
+    config.RAZORPAY_KEY_ID.includes('mock') ||
+    config.RAZORPAY_KEY_ID.includes('YourTestKeyId') ||
+    config.RAZORPAY_KEY_SECRET.includes('your_test')
+  ) {
     return {
       id: `rfnd_${crypto.randomBytes(8).toString('hex')}`,
       payment_id: paymentId,

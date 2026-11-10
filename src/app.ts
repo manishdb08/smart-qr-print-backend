@@ -152,11 +152,21 @@ export async function buildApp(): Promise<FastifyInstance> {
     });
   });
 
+  // Binary uploads parser for presigned mock storage
+  app.addContentTypeParser(
+    ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'application/octet-stream'],
+    { parseAs: 'buffer' },
+    (_req, body, done) => {
+      done(null, body);
+    }
+  );
+
   // Preserve raw body for accurate HMAC webhook verification
   app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
     try {
-      (req as any).rawBody = body.toString('utf-8');
-      const json = JSON.parse(body.toString('utf-8'));
+      const raw = body.toString('utf-8').trim();
+      (req as any).rawBody = raw;
+      const json = raw.length > 0 ? JSON.parse(raw) : {};
       done(null, json);
     } catch (err: any) {
       err.statusCode = 400;

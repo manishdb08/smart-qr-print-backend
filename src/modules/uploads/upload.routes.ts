@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { presignUploadSchema, completeUploadSchema } from './upload.types.js';
 import { createPresignedUpload, completeUpload } from './upload.service.js';
 import { authenticateUser } from '../../auth/rbac.js';
+import { getStorageProvider } from '../../storage/index.js';
 
 export async function uploadRoutes(fastify: FastifyInstance) {
   // 1. Presign Upload URL
@@ -136,6 +137,32 @@ export async function uploadRoutes(fastify: FastifyInstance) {
         success: true,
         data: result,
       });
+    }
+  );
+
+  // 3. Mock Storage Upload (Dev / Local Testing)
+  fastify.put(
+    '/mock-storage/upload',
+    async (request, reply) => {
+      const { key } = request.query as { key: string };
+      const buffer = request.body as Buffer;
+      const mime = (request.headers['content-type'] as string) || 'application/octet-stream';
+      const storage = getStorageProvider();
+      await storage.putFileBuffer(key, buffer, mime);
+      return reply.send({ success: true, message: 'File written to local storage.' });
+    }
+  );
+
+  // 4. Mock Storage Download (Dev / Local Testing)
+  fastify.get(
+    '/mock-storage/download',
+    async (request, reply) => {
+      const { key } = request.query as { key: string };
+      const storage = getStorageProvider();
+      const buffer = await storage.getFileBuffer(key);
+      const meta = await storage.getFileMetadata(key);
+      reply.header('Content-Type', meta.contentType || 'application/octet-stream');
+      return reply.send(buffer);
     }
   );
 }
