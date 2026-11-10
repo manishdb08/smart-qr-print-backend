@@ -31,8 +31,9 @@ async function startServer() {
 
   const hostDisplay = config.HOST === '0.0.0.0' ? 'localhost' : config.HOST;
   console.log(`🚀 Smart QR Print Server running at http://${hostDisplay}:${targetPort}`);
-  console.log(`📖 OpenAPI Swagger docs available at http://${hostDisplay}:${targetPort}/docs`);
-  console.log(`🩺 Healthcheck: http://${hostDisplay}:${targetPort}/health`);
+  console.log(`📱 Customer Kiosk Web App: http://${hostDisplay}:${targetPort}/app`);
+  console.log(`📖 OpenAPI Swagger docs:  http://${hostDisplay}:${targetPort}/docs`);
+  console.log(`🩺 System Health Check:    http://${hostDisplay}:${targetPort}/health`);
 }
 
 startServer();

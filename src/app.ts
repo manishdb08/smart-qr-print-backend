@@ -4,7 +4,11 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
+import fastifyStatic from '@fastify/static';
 import crypto from 'node:crypto';
+import path from 'node:path';
+
+const publicPath = path.resolve(process.cwd(), 'public');
 
 import { config } from './config/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -116,6 +120,17 @@ export async function buildApp(): Promise<FastifyInstance> {
     staticCSP: true,
   });
 
+  // 5. Serve Customer Kiosk / Mobile Web App
+  await app.register(fastifyStatic, {
+    root: publicPath,
+    prefix: '/app/',
+    decorateReply: false,
+  });
+
+  app.get('/app', async (_req, reply) => {
+    return reply.redirect('/app/');
+  });
+
 
   // 5. Centralized Error Handler
   app.setErrorHandler(errorHandler);
@@ -126,6 +141,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     status: 'online',
     version: '1.0.0',
     documentation: '/docs',
+    kioskApp: '/app',
     timestamp: new Date().toISOString(),
   }));
 
