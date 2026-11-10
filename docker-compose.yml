@@ -1,0 +1,121 @@
+version: '3.8'
+
+services:
+  # ----------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: smart-qr-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: smartqr
+      POSTGRES_PASSWORD: smartqr_secret
+      POSTGRES_DB: smart_qr_print
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smartqr -d smart_qr_print"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - smart-qr-network
+
+  # ----------------------------------------------------------------------------
+  # Redis Queue & Cache
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: smart-qr-redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "redis_secret", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis_secret", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - smart-qr-network
+
+  # ----------------------------------------------------------------------------
+  # Smart QR Print API Service
+  # ----------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smart-qr-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://smartqr:smartqr_secret@postgres:5432/smart_qr_print?schema=public
+      REDIS_URL: redis://:redis_secret@redis:6379
+      STORAGE_PROVIDER: local
+      STORAGE_LOCAL_DIR: ./storage
+      AGENT_SHARED_SECRET: agent_hardware_secret_key_change_in_production
+      JWT_SECRET: dev_jwt_super_secret_signing_key_at_least_32_chars_long
+      CORS_ORIGIN: "*"
+    ports:
+      - "5000:5000"
+    volumes:
+      - app_storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - smart-qr-network
+
+  # ----------------------------------------------------------------------------
+  # Smart QR Print BullMQ Transformation Worker Service
+  # ----------------------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smart-qr-worker
+    restart: unless-stopped
+    command: ["node", "dist/worker.js"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://smartqr:smartqr_secret@postgres:5432/smart_qr_print?schema=public
+      REDIS_URL: redis://:redis_secret@redis:6379
+      STORAGE_PROVIDER: local
+      STORAGE_LOCAL_DIR: ./storage
+    volumes:
+      - app_storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - smart-qr-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  app_storage:
+    driver: local
+
+networks:
+  smart-qr-network:
+    driver: bridge

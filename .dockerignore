@@ -1,0 +1,46 @@
+# Dependency and build directories
+node_modules
+dist
+coverage
+tests
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment and secrets (NEVER bake credentials into container images)
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+
+# Version control & IDEs
+.git
+.gitignore
+.github
+.vscode
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Storage / Local Uploads
+storage/
+tmp/
+.system_generated/

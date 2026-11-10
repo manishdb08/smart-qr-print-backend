@@ -1,0 +1,403 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+// -----------------------------------------------------------------------------
+// ENUMS
+// -----------------------------------------------------------------------------
+
+enum Role {
+  customer
+  printer_operator
+  admin
+  print_agent
+}
+
+enum PrinterStatus {
+  online
+  offline
+  busy
+  maintenance
+}
+
+enum QrSessionStatus {
+  active
+  used
+  expired
+}
+
+enum PrintJobStatus {
+  draft
+  uploaded
+  processing
+  awaiting_user_approval
+  awaiting_payment
+  payment_pending
+  paid
+  queued
+  claimed_by_printer
+  printing
+  completed
+  failed
+  cancelled
+  refund_pending
+  refunded
+}
+
+enum TransformationAction {
+  crop
+  rotate
+  remove_pages
+  reorder_pages
+  compress
+  grayscale
+  basic_color_correction
+  translate
+  OCR
+  summarize
+  extract_print_settings
+  enhance_image
+  colorize_image
+}
+
+enum TransformationStatus {
+  pending
+  processing
+  completed
+  failed
+  approved
+  rejected
+}
+
+enum RazorpayOrderStatus {
+  created
+  attempted
+  paid
+  failed
+}
+
+enum DispatchStatus {
+  pending
+  claimed
+  dispatch_failed
+  acked
+  printed
+}
+
+enum ActorType {
+  user
+  agent
+  webhook
+  system
+}
+
+// -----------------------------------------------------------------------------
+// MODELS
+// -----------------------------------------------------------------------------
+
+model User {
+  id           String          @id @default(uuid())
+  email        String          @unique
+  role         Role            @default(customer)
+  name         String?
+  supabaseUid  String?         @unique
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  documentAssets DocumentAsset[]
+  printJobs      PrintJob[]
+  auditEvents    AuditEvent[]
+  qrSessions     QrSession[]
+
+  @@index([role])
+}
+
+model Printer {
+  id              String             @id // e.g. "library-a4-01", "lab-mono-01"
+  name            String
+  location        String
+  status          PrinterStatus      @default(online)
+  lastHeartbeatAt DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  capabilities    PrinterCapability?
+  qrSessions      QrSession[]
+  printJobs       PrintJob[]
+  agents          PrinterAgent[]
+  dispatches      PrinterDispatch[]
+
+  @@index([status])
+}
+
+model PrinterCapability {
+  id                 String   @id @default(uuid())
+  printerId          String   @unique
+  supportsColor      Boolean  @default(false)
+  supportsMono       Boolean  @default(true)
+  supportsDuplex     Boolean  @default(true)
+  supportedPageSizes Json     // string array e.g. ["A4"]
+  maxDpi             Int      @default(600)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  printer            Printer  @relation(fields: [printerId], references: [id], onDelete: Cascade)
+}
+
+model QrSession {
+  id             String          @id @default(uuid())
+  printerId      String
+  token          String          @unique
+  tokenSignature String
+  expiresAt      DateTime
+  status         QrSessionStatus @default(active)
+  userId         String?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime        @default(now())
+
+  printer        Printer         @relation(fields: [printerId], references: [id], onDelete: Cascade)
+  user           User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([printerId])
+  @@index([token])
+  @@index([status, expiresAt])
+}
+
+model DocumentAsset {
+  id                  String             @id @default(uuid())
+  userId              String
+  originalFileName    String
+  mimeType            String
+  checksumSha256      String
+  fileSizeBytes       Int
+  pageCount           Int
+  storageKey          String             @unique
+  isImmutableOriginal Boolean            @default(true)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  versions            AssetVersion[]
+  transformations     AiTransformation[]
+
+  @@index([userId])
+  @@index([checksumSha256])
+}
+
+model AssetVersion {
+  id                    String             @id @default(uuid())
+  assetId               String
+  versionNumber         Int                @default(1)
+  derivationType        String             // "original", "crop", "translate", "enhance_image", etc.
+  fileSizeBytes         Int
+  pageCount             Int
+  storageKey            String             @unique
+  previewStorageKey     String?
+  checksumSha256        String
+  isApproved            Boolean            @default(false)
+  metadata              Json?
+  createdAt             DateTime           @default(now())
+
+  asset                 DocumentAsset      @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  printJobs             PrintJob[]
+  sourceTransformations AiTransformation[] @relation("SourceVersion")
+  targetTransformations AiTransformation[] @relation("TargetVersion")
+
+  @@unique([assetId, versionNumber])
+  @@index([assetId])
+}
+
+model AiTransformation {
+  id                     String               @id @default(uuid())
+  assetId                String
+  sourceVersionId        String
+  targetVersionId        String?
+  action                 TransformationAction
+  status                 TransformationStatus @default(pending)
+  inputParams            Json
+  resultMetadata         Json?
+  aiProvider             String               // "gemini", "deterministic", "sharp"
+  userConfirmedOwnership Boolean              @default(false)
+  approvedAt             DateTime?
+  rejectedAt             DateTime?
+  rejectionReason        String?
+  errorMessage           String?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+
+  asset                  DocumentAsset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  sourceVersion          AssetVersion         @relation("SourceVersion", fields: [sourceVersionId], references: [id], onDelete: Cascade)
+  targetVersion          AssetVersion?        @relation("TargetVersion", fields: [targetVersionId], references: [id], onDelete: SetNull)
+
+  @@index([assetId])
+  @@index([status])
+}
+
+model PrintJob {
+  id               String          @id @default(uuid())
+  shortCode        String          @unique // human-friendly 6-char kiosk code
+  userId           String
+  printerId        String
+  assetVersionId   String
+  status           PrintJobStatus  @default(draft)
+  totalAmountPaise Int?            // Integer paise only
+  retryCount       Int             @default(0)
+  failureReason    String?
+  expiresAt        DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  printer          Printer         @relation(fields: [printerId], references: [id], onDelete: Restrict)
+  assetVersion     AssetVersion    @relation(fields: [assetVersionId], references: [id], onDelete: Restrict)
+  settings         PrintSettings?
+  priceQuotes      PriceQuote[]
+  razorpayOrders   RazorpayOrder[]
+  dispatches       PrinterDispatch[]
+
+  @@index([userId])
+  @@index([printerId])
+  @@index([status])
+  @@index([shortCode])
+}
+
+model PrintSettings {
+  id             String   @id @default(uuid())
+  printJobId     String   @unique
+  copies         Int      @default(1)
+  isColor        Boolean  @default(false)
+  isDuplex       Boolean  @default(false)
+  pageSize       String   @default("A4")
+  pageRange      String   @default("all")
+  fitToPage      Boolean  @default(true)
+  orientation    String   @default("portrait")
+  rawRequestText String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  printJob       PrintJob @relation(fields: [printJobId], references: [id], onDelete: Cascade)
+}
+
+model PriceQuote {
+  id                    String          @id @default(uuid())
+  printJobId            String
+  pricingRuleVersion    String          // e.g. "v1.0.0"
+  baseMonoPagePaise     Int             @default(200) // 200 paise = 2 INR
+  baseColorPagePaise    Int             @default(800) // 800 paise = 8 INR
+  duplexDiscountPercent Int             @default(10)  // 10% discount on duplex
+  minOrderPaise         Int             @default(200) // 200 paise minimum
+  calculatedPages       Int
+  copies                Int
+  subtotalPaise         Int
+  discountPaise         Int
+  taxPaise              Int             @default(0)
+  totalAmountPaise      Int             // integer paise
+  currency              String          @default("INR")
+  expiresAt             DateTime
+  createdAt             DateTime        @default(now())
+
+  printJob              PrintJob        @relation(fields: [printJobId], references: [id], onDelete: Cascade)
+  razorpayOrders        RazorpayOrder[]
+
+  @@index([printJobId])
+}
+
+model RazorpayOrder {
+  id              String              @id @default(uuid())
+  printJobId      String
+  priceQuoteId    String
+  razorpayOrderId String              @unique
+  amountPaise     Int
+  currency        String              @default("INR")
+  status          RazorpayOrderStatus @default(created)
+  receipt         String
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  printJob        PrintJob            @relation(fields: [printJobId], references: [id], onDelete: Cascade)
+  priceQuote      PriceQuote          @relation(fields: [priceQuoteId], references: [id], onDelete: Restrict)
+  paymentEvents   PaymentEvent[]
+
+  @@index([printJobId])
+  @@index([razorpayOrderId])
+}
+
+model PaymentEvent {
+  id                String         @id @default(uuid())
+  razorpayOrderId   String?
+  eventId           String         @unique // Idempotency check key
+  eventType         String
+  payload           Json
+  signatureVerified Boolean        @default(false)
+  processedAt       DateTime       @default(now())
+  createdAt         DateTime       @default(now())
+
+  razorpayOrder     RazorpayOrder? @relation(fields: [razorpayOrderId], references: [id], onDelete: SetNull)
+
+  @@index([eventId])
+  @@index([razorpayOrderId])
+}
+
+model PrinterAgent {
+  id          String            @id @default(uuid())
+  printerId   String
+  agentName   String
+  secretHash  String
+  lastSeenAt  DateTime?
+  isBlocked   Boolean           @default(false)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  printer     Printer           @relation(fields: [printerId], references: [id], onDelete: Cascade)
+  dispatches  PrinterDispatch[]
+
+  @@index([printerId])
+}
+
+model PrinterDispatch {
+  id                   String         @id @default(uuid())
+  printJobId           String
+  printerId            String
+  printerAgentId       String?
+  dispatchStatus       DispatchStatus @default(pending)
+  claimedAt            DateTime?
+  printedAt            DateTime?
+  failureReason        String?
+  downloadUrlExpiresAt DateTime?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  printJob             PrintJob       @relation(fields: [printJobId], references: [id], onDelete: Cascade)
+  printer              Printer        @relation(fields: [printerId], references: [id], onDelete: Restrict)
+  printerAgent         PrinterAgent?  @relation(fields: [printerAgentId], references: [id], onDelete: SetNull)
+
+  @@index([printJobId])
+  @@index([printerId])
+  @@index([dispatchStatus])
+}
+
+model AuditEvent {
+  id         String    @id @default(uuid())
+  userId     String?
+  actorType  ActorType @default(user)
+  action     String
+  entityType String
+  entityId   String?
+  ipAddress  String?
+  userAgent  String?
+  metadata   Json?
+  createdAt  DateTime  @default(now())
+
+  user       User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
