@@ -73,9 +73,17 @@ export const prisma: PrismaClient = new Proxy(realPrisma, {
     }
 
     if (prop === '$transaction') {
-      return async (callbackOrArray: any) => {
+      return async (callbackOrArray: any, options?: any) => {
         try {
-          return await target.$transaction(callbackOrArray);
+          if (typeof callbackOrArray === 'function') {
+            const txOptions = {
+              maxWait: 20000,
+              timeout: 30000,
+              ...options,
+            };
+            return await target.$transaction(callbackOrArray, txOptions);
+          }
+          return await target.$transaction(callbackOrArray, options);
         } catch (err: any) {
           if (config.NODE_ENV !== 'production' && String(err).includes("Can't reach database server")) {
             return inMemoryProxy.$transaction(callbackOrArray);
