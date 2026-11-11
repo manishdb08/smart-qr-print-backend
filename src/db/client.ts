@@ -26,7 +26,14 @@ if (config.NODE_ENV !== 'production') {
   global.__inMemoryStore = inMemoryStore;
 }
 
-let isPostgresAvailable = false;
+const isExplicitPostgresConfigured = Boolean(
+  config.DATABASE_URL &&
+    !config.DATABASE_URL.includes('localhost') &&
+    !config.DATABASE_URL.includes('127.0.0.1') &&
+    !config.DATABASE_URL.includes('mock')
+);
+
+let isPostgresAvailable = isExplicitPostgresConfigured;
 let hasCheckedPostgres = false;
 
 export async function checkDatabaseConnection(): Promise<{ healthy: boolean; latencyMs?: number; mode: string; error?: string }> {
@@ -37,12 +44,24 @@ export async function checkDatabaseConnection(): Promise<{ healthy: boolean; lat
     hasCheckedPostgres = true;
     return { healthy: true, latencyMs: Date.now() - start, mode: 'postgresql' };
   } catch (err: unknown) {
+    if (isExplicitPostgresConfigured) {
+      // In explicit cloud postgres mode, retry once
+      try {
+        await new Promise((r) => setTimeout(r, 1000));
+        await realPrisma.$queryRaw`SELECT 1`;
+        isPostgresAvailable = true;
+        hasCheckedPostgres = true;
+        return { healthy: true, latencyMs: Date.now() - start, mode: 'postgresql' };
+      } catch {
+        // Fall through to error
+      }
+    }
     isPostgresAvailable = false;
     hasCheckedPostgres = true;
     const message = err instanceof Error ? err.message : String(err);
 
-    // In development or test, in-memory store acts as healthy fallback
-    if (config.NODE_ENV !== 'production') {
+    // In development or test without cloud db, in-memory store acts as fallback
+    if (config.NODE_ENV !== 'production' && !isExplicitPostgresConfigured) {
       return {
         healthy: true,
         mode: 'in-memory-dev',
@@ -56,9 +75,8 @@ export async function checkDatabaseConnection(): Promise<{ healthy: boolean; lat
 
 /**
  * Resilient Prisma Client wrapper:
- * - If PostgreSQL is reachable, queries execute directly against PostgreSQL.
- * - If PostgreSQL is unreachable (e.g. Docker not started locally), seamlessly delegates
- *   to in-memory store so development and testing never crash with connection errors.
+ * - If cloud/external PostgreSQL is configured, queries execute directly against PostgreSQL with auto-retry.
+ * - If PostgreSQL is offline in local dev (e.g. Docker not started), delegates to in-memory store.
  */
 export const prisma: PrismaClient = new Proxy(realPrisma, {
   get(target: any, prop: string | symbol) {
@@ -74,17 +92,23 @@ export const prisma: PrismaClient = new Proxy(realPrisma, {
 
     if (prop === '$transaction') {
       return async (callbackOrArray: any, options?: any) => {
+        const txOptions = typeof callbackOrArray === 'function' ? {
+          maxWait: 25000,
+          timeout: 45000,
+          ...options,
+        } : options;
+
         try {
-          if (typeof callbackOrArray === 'function') {
-            const txOptions = {
-              maxWait: 20000,
-              timeout: 30000,
-              ...options,
-            };
-            return await target.$transaction(callbackOrArray, txOptions);
-          }
-          return await target.$transaction(callbackOrArray, options);
+          return await target.$transaction(callbackOrArray, txOptions);
         } catch (err: any) {
+          if (isExplicitPostgresConfigured) {
+            const errStr = String(err?.message || err);
+            if (errStr.includes("Can't reach database server") || errStr.includes('P1001') || errStr.includes('P2028')) {
+              await new Promise((r) => setTimeout(r, 1000));
+              return await target.$transaction(callbackOrArray, txOptions);
+            }
+            throw err;
+          }
           if (config.NODE_ENV !== 'production' && String(err).includes("Can't reach database server")) {
             return inMemoryProxy.$transaction(callbackOrArray);
           }
@@ -100,10 +124,28 @@ export const prisma: PrismaClient = new Proxy(realPrisma, {
       return targetModel;
     }
 
+    if (isExplicitPostgresConfigured) {
+      return new Proxy(targetModel || {}, {
+        get(subTarget: any, method: string | symbol) {
+          return async (...args: any[]) => {
+            try {
+              return await subTarget[method](...args);
+            } catch (err: any) {
+              const errStr = String(err?.message || err);
+              if (errStr.includes("Can't reach database server") || errStr.includes('P1001')) {
+                await new Promise((r) => setTimeout(r, 1000));
+                return await subTarget[method](...args);
+              }
+              throw err;
+            }
+          };
+        },
+      });
+    }
+
     return new Proxy(targetModel || {}, {
       get(subTarget: any, method: string | symbol) {
         return async (...args: any[]) => {
-          // If we haven't checked or we know postgres is down in dev, try target first
           try {
             if (hasCheckedPostgres && !isPostgresAvailable && config.NODE_ENV !== 'production') {
               return await mockModel[method](...args);

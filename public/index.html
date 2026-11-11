@@ -481,17 +481,27 @@
     const paiseDisplay = document.getElementById('paiseDisplay');
     const quoteDetails = document.getElementById('quoteDetails');
 
+    let quoteDebounceTimer = null;
+    function schedulePriceQuote() {
+      priceDisplay.textContent = 'Calculating...';
+      paiseDisplay.textContent = 'updating options';
+      if (quoteDebounceTimer) clearTimeout(quoteDebounceTimer);
+      quoteDebounceTimer = setTimeout(() => {
+        updatePriceQuote();
+      }, 350);
+    }
+
     btnPlusCopy.onclick = () => {
       copies++;
       copiesCount.textContent = copies;
-      updatePriceQuote();
+      schedulePriceQuote();
     };
 
     btnMinusCopy.onclick = () => {
       if (copies > 1) {
         copies--;
         copiesCount.textContent = copies;
-        updatePriceQuote();
+        schedulePriceQuote();
       }
     };
 
@@ -499,19 +509,19 @@
       isColor = false;
       btnModeMono.className = 'py-2.5 px-3 rounded-xl border-2 border-indigo-600 bg-indigo-50 font-bold text-xs text-indigo-900 flex items-center justify-center space-x-1.5';
       btnModeColor.className = 'py-2.5 px-3 rounded-xl border border-slate-200 bg-white font-medium text-xs text-slate-600 hover:bg-slate-50 flex items-center justify-center space-x-1.5';
-      updatePriceQuote();
+      schedulePriceQuote();
     };
 
     btnModeColor.onclick = () => {
       isColor = true;
       btnModeColor.className = 'py-2.5 px-3 rounded-xl border-2 border-indigo-600 bg-indigo-50 font-bold text-xs text-indigo-900 flex items-center justify-center space-x-1.5';
       btnModeMono.className = 'py-2.5 px-3 rounded-xl border border-slate-200 bg-white font-medium text-xs text-slate-600 hover:bg-slate-50 flex items-center justify-center space-x-1.5';
-      updatePriceQuote();
+      schedulePriceQuote();
     };
 
     checkDuplex.onchange = (e) => {
       isDuplex = e.target.checked;
-      updatePriceQuote();
+      schedulePriceQuote();
     };
 
     async function updatePriceQuote() {
@@ -562,7 +572,7 @@
       } catch (err) {
         console.error('Quote error:', err);
         priceDisplay.textContent = '₹0.00';
-        paiseDisplay.textContent = 'Error calculating quote';
+        paiseDisplay.textContent = err.message || 'Error calculating quote';
         if (btnPay) btnPay.disabled = false;
       }
     }
