@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart QR Print — Mobile Kiosk App</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Razorpay Checkout SDK -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <!-- Canvas Confetti -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+    .glass-card {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(229, 231, 235, 0.8);
+    }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 min-h-screen text-slate-800 antialiased py-6 px-4">
+  <div class="max-w-md mx-auto">
+    <!-- Header & Kiosk Info -->
+    <header class="flex items-center justify-between mb-6 text-white">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/30 font-extrabold text-xl">
+          🖨️
+        </div>
+        <div>
+          <h1 class="text-xl font-bold tracking-tight text-white leading-tight">Smart QR Print</h1>
+          <p class="text-xs text-indigo-200">Self-Service Instant Printing</p>
+        </div>
+      </div>
+      <div id="connectionPill" class="flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs font-semibold">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span>Online</span>
+      </div>
+    </header>
+
+    <!-- Main Wizard Card -->
+    <main class="glass-card rounded-3xl p-6 shadow-2xl relative overflow-hidden transition-all duration-300">
+      
+      <!-- Progress Bar (Steps 1 to 4) -->
+      <div class="flex items-center justify-between mb-6 pb-4 border-b border-slate-100">
+        <div class="flex items-center space-x-2">
+          <span id="stepBadge" class="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center">1</span>
+          <span id="stepTitle" class="text-sm font-bold text-slate-800">Select Kiosk</span>
+        </div>
+        <span id="stepIndicator" class="text-xs font-medium text-slate-400">Step 1 of 4</span>
+      </div>
+
+      <!-- ================================================================= -->
+      <!-- STEP 1: Select Kiosk / Printer -->
+      <!-- ================================================================= -->
+      <section id="step1" class="space-y-4">
+        <div class="text-center py-2">
+          <h2 class="text-lg font-bold text-slate-900">Choose Printer Kiosk</h2>
+          <p class="text-xs text-slate-500 mt-1">Tap the kiosk matching your physical station</p>
+        </div>
+
+        <div id="printersList" class="space-y-3">
+          <!-- Dynamically populated from API -->
+          <div class="p-4 rounded-2xl border-2 border-indigo-600 bg-indigo-50/50 flex items-center justify-between cursor-pointer">
+            <div>
+              <p class="text-sm font-bold text-slate-900">Central Library Kiosk</p>
+              <p class="text-xs text-slate-500">Main Library 1st Floor (Mono & Color)</p>
+            </div>
+            <span class="text-xs bg-indigo-600 text-white px-2.5 py-1 rounded-full font-semibold">Active</span>
+          </div>
+        </div>
+
+        <button id="btnConfirmPrinter" class="w-full mt-4 py-3.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2 transition-all">
+          <span>Continue to Upload</span>
+          <span>→</span>
+        </button>
+      </section>
+
+      <!-- ================================================================= -->
+      <!-- STEP 2: Document Upload -->
+      <!-- ================================================================= -->
+      <section id="step2" class="space-y-4 hidden">
+        <div class="text-center py-1">
+          <h2 class="text-lg font-bold text-slate-900">Upload Your Document</h2>
+          <p class="text-xs text-slate-500 mt-1">Supports PDF, PNG, JPEG up to 50MB</p>
+        </div>
+
+        <!-- Drag & Drop Zone -->
+        <div id="dropZone" class="border-2 border-dashed border-indigo-200 hover:border-indigo-500 bg-indigo-50/30 rounded-2xl p-8 text-center cursor-pointer transition-all">
+          <input type="file" id="fileInput" accept=".pdf,image/png,image/jpeg" class="hidden" />
+          <div class="w-12 h-12 mx-auto rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-2xl mb-3">
+            📄
+          </div>
+          <p class="text-sm font-bold text-slate-800">Tap to browse or drop file here</p>
+          <p class="text-xs text-slate-400 mt-1">PDF or High-res Images</p>
+        </div>
+
+        <!-- Selected File Preview -->
+        <div id="fileInfoBox" class="hidden p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-2.5 truncate">
+              <span class="text-2xl" id="fileIcon">📄</span>
+              <div class="truncate">
+                <p id="fileName" class="text-xs font-bold text-slate-800 truncate">document.pdf</p>
+                <p id="fileMeta" class="text-[11px] text-slate-400">120 KB • Detecting pages...</p>
+              </div>
+            </div>
+            <button id="btnRemoveFile" class="text-xs text-red-500 hover:text-red-700 font-bold px-2 py-1">Remove</button>
+          </div>
+          <!-- Upload progress -->
+          <div id="uploadProgressContainer" class="hidden space-y-1 pt-1">
+            <div class="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+              <div id="uploadProgressBar" class="bg-indigo-600 h-1.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+            <p id="uploadStatusText" class="text-[10px] text-indigo-600 font-semibold text-right">Uploading...</p>
+          </div>
+        </div>
+
+        <div class="flex space-x-3 pt-2">
+          <button id="btnBackToStep1" class="w-1/3 py-3 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-bold text-sm">
+            ← Back
+          </button>
+          <button id="btnProceedToOptions" disabled class="w-2/3 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-2xl font-bold text-sm shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-1">
+            <span>Configure Print</span>
+            <span>→</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- ================================================================= -->
+      <!-- STEP 3: Print Options & Live Server Pricing -->
+      <!-- ================================================================= -->
+      <section id="step3" class="space-y-4 hidden">
+        <div>
+          <h2 class="text-lg font-bold text-slate-900">Print Configuration</h2>
+          <p class="text-xs text-slate-500">Server calculates price with zero client trust</p>
+        </div>
+
+        <!-- Copies Stepper -->
+        <div class="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+          <div>
+            <p class="text-sm font-bold text-slate-800">Number of Copies</p>
+            <p class="text-xs text-slate-400">Sets of document</p>
+          </div>
+          <div class="flex items-center space-x-3">
+            <button id="btnMinusCopy" class="w-8 h-8 rounded-xl bg-white border border-slate-200 font-bold text-slate-700 hover:bg-slate-100 flex items-center justify-center">-</button>
+            <span id="copiesCount" class="font-bold text-base text-slate-900 w-4 text-center">1</span>
+            <button id="btnPlusCopy" class="w-8 h-8 rounded-xl bg-white border border-slate-200 font-bold text-slate-700 hover:bg-slate-100 flex items-center justify-center">+</button>
+          </div>
+        </div>
+
+        <!-- Color Mode Toggle -->
+        <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+          <p class="text-xs font-bold text-slate-800 uppercase tracking-wider">Color Mode</p>
+          <div class="grid grid-cols-2 gap-2">
+            <button id="btnModeMono" class="py-2.5 px-3 rounded-xl border-2 border-indigo-600 bg-indigo-50 font-bold text-xs text-indigo-900 flex items-center justify-center space-x-1.5">
+              <span>⬛ Black & White</span>
+            </button>
+            <button id="btnModeColor" class="py-2.5 px-3 rounded-xl border border-slate-200 bg-white font-medium text-xs text-slate-600 hover:bg-slate-50 flex items-center justify-center space-x-1.5">
+              <span>🌈 Full Color</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Duplex (Double-sided) Toggle -->
+        <div class="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+          <div>
+            <div class="flex items-center space-x-2">
+              <p class="text-sm font-bold text-slate-800">Double-Sided (Duplex)</p>
+              <span class="text-[10px] font-extrabold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">10% OFF</span>
+            </div>
+            <p class="text-xs text-slate-400">Saves paper & costs less</p>
+          </div>
+          <input type="checkbox" id="checkDuplex" class="w-5 h-5 accent-indigo-600 rounded cursor-pointer" />
+        </div>
+
+        <!-- Live Server Quote Card -->
+        <div class="p-4 rounded-2xl bg-gradient-to-r from-indigo-900 to-slate-900 text-white space-y-2 shadow-xl">
+          <div class="flex justify-between items-baseline">
+            <span class="text-xs text-indigo-200">Total Price (Official Quote)</span>
+            <span id="priceDisplay" class="text-2xl font-black text-emerald-400">₹2.00</span>
+          </div>
+          <div class="text-[11px] text-slate-300 flex justify-between border-t border-indigo-800/80 pt-2">
+            <span id="quoteDetails">1 page • 1 copy • Mono</span>
+            <span id="paiseDisplay" class="font-mono text-indigo-300">200 paise</span>
+          </div>
+        </div>
+
+        <div class="flex space-x-3 pt-2">
+          <button id="btnBackToStep2" class="w-1/3 py-3 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-bold text-sm">
+            ← Back
+          </button>
+          <button id="btnProceedToPay" class="w-2/3 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-bold text-sm shadow-lg shadow-emerald-600/30 flex items-center justify-center space-x-1.5">
+            <span>Pay & Print Now</span>
+            <span>⚡</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- ================================================================= -->
+      <!-- STEP 4: Live Print Status & Hardware Dispatch -->
+      <!-- ================================================================= -->
+      <section id="step4" class="space-y-5 hidden text-center py-2">
+        <div class="w-16 h-16 rounded-2xl bg-indigo-100 text-indigo-600 text-3xl mx-auto flex items-center justify-center animate-bounce shadow-md">
+          🖨️
+        </div>
+
+        <div>
+          <h2 id="jobStatusTitle" class="text-xl font-extrabold text-slate-900">Printing in Progress...</h2>
+          <p id="jobStatusSubtitle" class="text-xs text-slate-500 mt-1">Please wait near the printer tray</p>
+        </div>
+
+        <!-- Shortcode & Kiosk Pickup Card -->
+        <div class="p-4 rounded-2xl bg-indigo-50 border border-indigo-200 text-left space-y-2">
+          <div class="flex justify-between items-center">
+            <span class="text-xs font-semibold text-slate-500">Job Short Code</span>
+            <span id="displayShortCode" class="font-mono text-base font-black text-indigo-700 bg-white px-3 py-1 rounded-lg border border-indigo-200">---</span>
+          </div>
+          <div class="flex justify-between items-center text-xs">
+            <span class="text-slate-500">Target Printer</span>
+            <span id="displayPrinterName" class="font-bold text-slate-800">Library Kiosk</span>
+          </div>
+          <div class="flex justify-between items-center text-xs">
+            <span class="text-slate-500">Amount Paid</span>
+            <span id="displayAmountPaid" class="font-bold text-emerald-600">₹0.00</span>
+          </div>
+        </div>
+
+        <!-- Stepper Progress Timeline -->
+        <div class="space-y-3 text-left pl-2">
+          <div class="flex items-center space-x-3 text-xs">
+            <span id="badgeStepPaid" class="w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] font-bold">✓</span>
+            <span class="font-bold text-slate-800">Payment Verified (Razorpay HMAC)</span>
+          </div>
+          <div class="flex items-center space-x-3 text-xs">
+            <span id="badgeStepClaim" class="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-bold animate-pulse">2</span>
+            <span id="textStepClaim" class="font-semibold text-slate-700">Hardware Daemon Claiming Job...</span>
+          </div>
+          <div class="flex items-center space-x-3 text-xs">
+            <span id="badgeStepPrint" class="w-5 h-5 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-[10px] font-bold">3</span>
+            <span id="textStepPrint" class="text-slate-400">Printing Pages to Tray...</span>
+          </div>
+        </div>
+
+        <button id="btnNewPrint" class="w-full py-3.5 px-4 bg-slate-900 hover:bg-black text-white rounded-2xl font-bold text-sm shadow-md transition-all">
+          Print Another Document
+        </button>
+      </section>
+
+    </main>
+
+    <!-- Footer Security Notice -->
+    <footer class="mt-6 text-center text-slate-400 text-xs space-y-1">
+      <p>🔒 Zero-Trust Security • End-to-End Encryption • 256-bit SHA Verification</p>
+      <p>© 2026 Smart QR Print Network. All rights reserved.</p>
+    </footer>
+  </div>
+
+  <!-- Application Logic -->
+  <script>
+    // State
+    const API_BASE = '/v1';
+    let selectedPrinterId = 'library-a4-01';
+    let qrSessionToken = null;
+    let uploadedAssetId = null;
+    let uploadedVersionId = null;
+    let pageCount = 1;
+    let copies = 1;
+    let isColor = false;
+    let isDuplex = false;
+    let currentJobId = null;
+    let currentShortCode = null;
+    let pollInterval = null;
+
+    // Elements
+    const step1 = document.getElementById('step1');
+    const step2 = document.getElementById('step2');
+    const step3 = document.getElementById('step3');
+    const step4 = document.getElementById('step4');
+    const stepTitle = document.getElementById('stepTitle');
+    const stepBadge = document.getElementById('stepBadge');
+    const stepIndicator = document.getElementById('stepIndicator');
+
+    // 1. Initial Load: Fetch Printers
+    async function init() {
+      try {
+        const res = await fetch(`${API_BASE}/printers`);
+        const json = await res.json();
+        if (json.success && json.data.length > 0) {
+          renderPrinters(json.data);
+        }
+      } catch (err) {
+        console.error('Failed to load printers:', err);
+      }
+    }
+
+    function renderPrinters(printers) {
+      const container = document.getElementById('printersList');
+      container.innerHTML = printers.map(p => `
+        <div onclick="selectPrinter('${p.id}')" id="card_${p.id}" class="p-4 rounded-2xl border-2 ${p.id === selectedPrinterId ? 'border-indigo-600 bg-indigo-50/50' : 'border-slate-200 bg-white'} flex items-center justify-between cursor-pointer transition-all">
+          <div>
+            <p class="text-sm font-bold text-slate-900">${p.name}</p>
+            <p class="text-xs text-slate-500">${p.location} • Status: <span class="capitalize font-semibold text-emerald-600">${p.status}</span></p>
+          </div>
+          <span class="text-xs px-2.5 py-1 rounded-full font-semibold ${p.id === selectedPrinterId ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'}">
+            ${p.id === selectedPrinterId ? 'Selected' : 'Choose'}
+          </span>
+        </div>
+      `).join('');
+    }
+
+    window.selectPrinter = (id) => {
+      selectedPrinterId = id;
+      init();
+    };
+
+    // Step 1 -> Step 2
+    document.getElementById('btnConfirmPrinter').onclick = async () => {
+      try {
+        // Create QR Session
+        const res = await fetch(`${API_BASE}/qr-sessions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ printerId: selectedPrinterId })
+        });
+        const json = await res.json();
+        if (json.success) {
+          qrSessionToken = json.data.token;
+          goToStep(2);
+        }
+      } catch (err) {
+        alert('Could not start QR session: ' + err.message);
+      }
+    };
+
+    function goToStep(step) {
+      [step1, step2, step3, step4].forEach(s => s.classList.add('hidden'));
+      if (step === 1) {
+        step1.classList.remove('hidden');
+        stepTitle.textContent = 'Select Kiosk';
+        stepBadge.textContent = '1';
+        stepIndicator.textContent = 'Step 1 of 4';
+      } else if (step === 2) {
+        step2.classList.remove('hidden');
+        stepTitle.textContent = 'Upload Document';
+        stepBadge.textContent = '2';
+        stepIndicator.textContent = 'Step 2 of 4';
+      } else if (step === 3) {
+        step3.classList.remove('hidden');
+        stepTitle.textContent = 'Print Configuration';
+        stepBadge.textContent = '3';
+        stepIndicator.textContent = 'Step 3 of 4';
+        updatePriceQuote();
+      } else if (step === 4) {
+        step4.classList.remove('hidden');
+        stepTitle.textContent = 'Live Kiosk Dispatch';
+        stepBadge.textContent = '4';
+        stepIndicator.textContent = 'Completed';
+      }
+    }
+
+    // Step 2: Upload Handling
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const fileInfoBox = document.getElementById('fileInfoBox');
+    const fileName = document.getElementById('fileName');
+    const fileMeta = document.getElementById('fileMeta');
+    const btnProceedToOptions = document.getElementById('btnProceedToOptions');
+
+    dropZone.onclick = () => fileInput.click();
+
+    fileInput.onchange = (e) => {
+      const file = e.target.files[0];
+      if (file) handleFileSelected(file);
+    };
+
+    async function handleFileSelected(file) {
+      dropZone.classList.add('hidden');
+      fileInfoBox.classList.remove('hidden');
+      fileName.textContent = file.name;
+      fileMeta.textContent = `${(file.size / 1024).toFixed(1)} KB • Uploading to secure storage...`;
+
+      const progressContainer = document.getElementById('uploadProgressContainer');
+      const progressBar = document.getElementById('uploadProgressBar');
+      const statusText = document.getElementById('uploadStatusText');
+      progressContainer.classList.remove('hidden');
+      progressBar.style.width = '20%';
+
+      try {
+        // 1. Presign
+        const presignRes = await fetch(`${API_BASE}/uploads/presign`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer test-token-customer'
+          },
+          body: JSON.stringify({
+            originalFileName: file.name,
+            fileSizeBytes: file.size,
+            mimeType: file.type || 'application/pdf',
+            qrSessionToken
+          })
+        });
+        const presignJson = await presignRes.json();
+        if (!presignJson.success) throw new Error(presignJson.error?.message || 'Presign failed');
+
+        progressBar.style.width = '60%';
+        const { uploadUrl, storageKey } = presignJson.data;
+
+        // 2. Binary Upload
+        const targetUrl = uploadUrl.startsWith('http') ? uploadUrl : `${uploadUrl}`;
+        const uploadRes = await fetch(targetUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': file.type || 'application/pdf' },
+          body: file
+        });
+        if (!uploadRes.ok) throw new Error('Binary storage write failed');
+
+        progressBar.style.width = '85%';
+
+        // 3. Complete & Inspect
+        const completeRes = await fetch(`${API_BASE}/uploads/complete`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer test-token-customer'
+          },
+          body: JSON.stringify({
+            storageKey,
+            originalFileName: file.name,
+            mimeType: file.type || 'application/pdf',
+            qrSessionToken
+          })
+        });
+        const completeJson = await completeRes.json();
+        if (!completeJson.success) throw new Error(completeJson.error?.message || 'Inspection failed');
+
+        progressBar.style.width = '100%';
+        statusText.textContent = 'Verified & Ready';
+        statusText.className = 'text-[10px] text-emerald-600 font-bold text-right';
+
+        uploadedAssetId = completeJson.data.assetId;
+        uploadedVersionId = completeJson.data.activeVersion.id;
+        pageCount = completeJson.data.pageCount || 1;
+
+        fileMeta.textContent = `${(file.size / 1024).toFixed(1)} KB • Detected: ${pageCount} page(s) • SHA verified`;
+        btnProceedToOptions.removeAttribute('disabled');
+      } catch (err) {
+        alert('Upload Error: ' + err.message);
+        progressBar.style.backgroundColor = '#ef4444';
+        statusText.textContent = 'Upload failed';
+      }
+    }
+
+    document.getElementById('btnRemoveFile').onclick = () => {
+      dropZone.classList.remove('hidden');
+      fileInfoBox.classList.add('hidden');
+      btnProceedToOptions.setAttribute('disabled', 'true');
+      fileInput.value = '';
+    };
+
+    document.getElementById('btnBackToStep1').onclick = () => goToStep(1);
+    document.getElementById('btnProceedToOptions').onclick = () => goToStep(3);
+    document.getElementById('btnBackToStep2').onclick = () => goToStep(2);
+
+    // Step 3: Print Options Logic
+    const copiesCount = document.getElementById('copiesCount');
+    const btnMinusCopy = document.getElementById('btnMinusCopy');
+    const btnPlusCopy = document.getElementById('btnPlusCopy');
+    const btnModeMono = document.getElementById('btnModeMono');
+    const btnModeColor = document.getElementById('btnModeColor');
+    const checkDuplex = document.getElementById('checkDuplex');
+    const priceDisplay = document.getElementById('priceDisplay');
+    const paiseDisplay = document.getElementById('paiseDisplay');
+    const quoteDetails = document.getElementById('quoteDetails');
+
+    let quoteDebounceTimer = null;
+    function schedulePriceQuote() {
+      priceDisplay.textContent = 'Calculating...';
+      paiseDisplay.textContent = 'updating options';
+      if (quoteDebounceTimer) clearTimeout(quoteDebounceTimer);
+      quoteDebounceTimer = setTimeout(() => {
+        updatePriceQuote();
+      }, 350);
+    }
+
+    btnPlusCopy.onclick = () => {
+      copies++;
+      copiesCount.textContent = copies;
+      schedulePriceQuote();
+    };
+
+    btnMinusCopy.onclick = () => {
+      if (copies > 1) {
+        copies--;
+        copiesCount.textContent = copies;
+        schedulePriceQuote();
+      }
+    };
+
+    btnModeMono.onclick = () => {
+      isColor = false;
+      btnModeMono.className = 'py-2.5 px-3 rounded-xl border-2 border-indigo-600 bg-indigo-50 font-bold text-xs text-indigo-900 flex items-center justify-center space-x-1.5';
+      btnModeColor.className = 'py-2.5 px-3 rounded-xl border border-slate-200 bg-white font-medium text-xs text-slate-600 hover:bg-slate-50 flex items-center justify-center space-x-1.5';
+      schedulePriceQuote();
+    };
+
+    btnModeColor.onclick = () => {
+      isColor = true;
+      btnModeColor.className = 'py-2.5 px-3 rounded-xl border-2 border-indigo-600 bg-indigo-50 font-bold text-xs text-indigo-900 flex items-center justify-center space-x-1.5';
+      btnModeMono.className = 'py-2.5 px-3 rounded-xl border border-slate-200 bg-white font-medium text-xs text-slate-600 hover:bg-slate-50 flex items-center justify-center space-x-1.5';
+      schedulePriceQuote();
+    };
+
+    checkDuplex.onchange = (e) => {
+      isDuplex = e.target.checked;
+      schedulePriceQuote();
+    };
+
+    async function updatePriceQuote() {
+      if (!uploadedVersionId) return;
+
+      const btnPay = document.getElementById('btnProceedToPay');
+      if (btnPay) btnPay.disabled = true;
+      priceDisplay.textContent = 'Calculating...';
+      paiseDisplay.textContent = 'fetching quote';
+
+      try {
+        // Create or update draft job
+        const draftRes = await fetch(`${API_BASE}/print-jobs`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer test-token-customer'
+          },
+          body: JSON.stringify({
+            assetVersionId: uploadedVersionId,
+            printerId: selectedPrinterId,
+            copies,
+            isColor,
+            isDuplex,
+            pageSize: 'A4'
+          })
+        });
+        const draftJson = await draftRes.json();
+        if (!draftJson.success) throw new Error(draftJson.error?.message || 'Could not create print job');
+
+        currentJobId = draftJson.data.id;
+        currentShortCode = draftJson.data.shortCode;
+
+        // Fetch official quote
+        const quoteRes = await fetch(`${API_BASE}/print-jobs/${currentJobId}/quote`, {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer test-token-customer' }
+        });
+        const quoteJson = await quoteRes.json();
+        if (!quoteJson.success) throw new Error(quoteJson.error?.message || 'Could not calculate quote');
+
+        const totalPaise = quoteJson.data.totalAmountPaise;
+
+        priceDisplay.textContent = `₹${(totalPaise / 100).toFixed(2)}`;
+        paiseDisplay.textContent = `${totalPaise} paise`;
+        quoteDetails.textContent = `${pageCount} page(s) • ${copies} copy • ${isColor ? 'Color' : 'Mono'}${isDuplex ? ' (Duplex -10%)' : ''}`;
+        if (btnPay) btnPay.disabled = false;
+      } catch (err) {
+        console.error('Quote error:', err);
+        priceDisplay.textContent = '₹0.00';
+        paiseDisplay.textContent = err.message || 'Error calculating quote';
+        if (btnPay) btnPay.disabled = false;
+      }
+    }
+
+    // Step 3 -> Step 4: Pay & Print
+    document.getElementById('btnProceedToPay').onclick = async () => {
+      const btn = document.getElementById('btnProceedToPay');
+      const originalText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `<span class="inline-block animate-spin mr-2">⏳</span> Initializing Payment...`;
+
+      try {
+        if (!currentJobId) {
+          await updatePriceQuote();
+        }
+
+        if (!currentJobId) {
+          throw new Error('Please configure your document options first.');
+        }
+
+        // 1. Create Razorpay Order
+        const orderRes = await fetch(`${API_BASE}/payments/razorpay/orders`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer test-token-customer'
+          },
+          body: JSON.stringify({ printJobId: currentJobId })
+        });
+        const orderJson = await orderRes.json();
+        if (!orderJson.success) throw new Error(orderJson.error?.message || 'Order failed');
+
+        const { orderId, amountPaise, keyId } = orderJson.data;
+
+        // 2. Open Razorpay Checkout or Mock Test Fallback
+        if (!keyId || keyId.includes('YourTestKeyId') || keyId.includes('mock') || keyId.includes('test')) {
+          // Dev Mock Instant Payment
+          await verifySimulatedPayment(orderId);
+        } else {
+          // Live / Razorpay Test Mode
+          const options = {
+            key: keyId,
+            amount: amountPaise,
+            currency: 'INR',
+            name: 'Smart QR Print',
+            description: `Print Job ${currentShortCode}`,
+            order_id: orderId,
+            handler: async function (response) {
+              await verifyPaymentWithBackend(orderId, response.razorpay_payment_id, response.razorpay_signature);
+            },
+            theme: { color: '#4f46e5' }
+          };
+          const rzp = new Razorpay(options);
+          rzp.open();
+        }
+      } catch (err) {
+        alert('Payment initiation failed: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+      }
+    };
+
+    async function verifySimulatedPayment(orderId) {
+      // Simulate Razorpay HMAC callback
+      const simPaymentId = `pay_kiosk_${Date.now()}`;
+      const verifyRes = await fetch(`${API_BASE}/payments/razorpay/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer test-token-customer'
+        },
+        body: JSON.stringify({
+          printJobId: currentJobId,
+          razorpay_order_id: orderId,
+          razorpay_payment_id: simPaymentId,
+          razorpay_signature: 'dev_mock_signature_approved'
+        })
+      });
+
+      startKioskTracker();
+    }
+
+    async function verifyPaymentWithBackend(orderId, paymentId, signature) {
+      await fetch(`${API_BASE}/payments/razorpay/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer test-token-customer'
+        },
+        body: JSON.stringify({
+          printJobId: currentJobId,
+          razorpay_order_id: orderId,
+          razorpay_payment_id: paymentId,
+          razorpay_signature: signature
+        })
+      });
+      startKioskTracker();
+    }
+
+    // Step 4: Live Polling Tracker
+    function startKioskTracker() {
+      goToStep(4);
+      document.getElementById('displayShortCode').textContent = currentShortCode;
+      document.getElementById('displayPrinterName').textContent = selectedPrinterId;
+      document.getElementById('displayAmountPaid').textContent = priceDisplay.textContent;
+
+      confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
+
+      // Poll status every 2 seconds
+      pollInterval = setInterval(async () => {
+        try {
+          const res = await fetch(`${API_BASE}/print-jobs/${currentJobId}`, {
+            headers: { 'Authorization': 'Bearer test-token-customer' }
+          });
+          const json = await res.json();
+          const status = json?.data?.status;
+
+          if (status === 'claimed_by_printer' || status === 'printing') {
+            document.getElementById('badgeStepClaim').innerHTML = '✓';
+            document.getElementById('badgeStepClaim').className = 'w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] font-bold';
+            document.getElementById('badgeStepPrint').className = 'w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-bold animate-pulse';
+            document.getElementById('textStepPrint').className = 'font-semibold text-slate-800';
+            document.getElementById('jobStatusTitle').textContent = 'Printing Document...';
+          }
+
+          if (status === 'completed') {
+            clearInterval(pollInterval);
+            document.getElementById('badgeStepPrint').innerHTML = '✓';
+            document.getElementById('badgeStepPrint').className = 'w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] font-bold';
+            document.getElementById('jobStatusTitle').textContent = 'Printing Complete! 🎉';
+            document.getElementById('jobStatusSubtitle').textContent = 'Please collect your printed pages from the output tray';
+            confetti({ particleCount: 100, spread: 80, origin: { y: 0.6 } });
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }, 2000);
+    }
+
+    document.getElementById('btnNewPrint').onclick = () => {
+      if (pollInterval) clearInterval(pollInterval);
+      window.location.reload();
+    };
+
+    // Initialize
+    init();
+  </script>
+</body>
+</html>

@@ -120,28 +120,30 @@ export async function buildApp(): Promise<FastifyInstance> {
     staticCSP: true,
   });
 
-  // 5. Serve Customer Kiosk / Mobile Web App
+  // 5. Serve Customer Kiosk & Complete React Web App
   await app.register(fastifyStatic, {
     root: publicPath,
-    prefix: '/app/',
+    prefix: '/',
     decorateReply: false,
   });
 
   app.get('/app', async (_req, reply) => {
-    return reply.redirect('/app/');
+    return reply.redirect('/');
   });
 
+  app.get('/app/', async (_req, reply) => {
+    return reply.redirect('/');
+  });
 
-  // 5. Centralized Error Handler
+  // 6. Centralized Error Handler
   app.setErrorHandler(errorHandler);
 
-  // 6. Root & Health Probes
-  app.get('/', async () => ({
+  // 7. Root & Health Probes
+  app.get('/api', async () => ({
     name: 'Smart QR Print Backend API',
     status: 'online',
     version: '1.0.0',
     documentation: '/docs',
-    kioskApp: '/app',
     timestamp: new Date().toISOString(),
   }));
 
