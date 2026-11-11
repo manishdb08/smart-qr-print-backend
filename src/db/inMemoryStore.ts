@@ -408,7 +408,9 @@ export class InMemoryDbStore {
           const settings = store.printSettings.get(job.id);
           const printer = store.printers.get(job.printerId);
           const assetVersion = store.assetVersions.get(job.assetVersionId);
-          const quotes = Array.from(store.priceQuotes.values()).filter((q) => q.printJobId === job.id);
+          const quotes = Array.from(store.priceQuotes.values())
+            .filter((q) => q.printJobId === job.id)
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
           const rzpOrders = Array.from(store.razorpayOrders.values()).filter((o) => o.printJobId === job.id);
           const dispatches = Array.from(store.printerDispatches.values()).filter((d) => d.printJobId === job.id);
 
@@ -447,7 +449,9 @@ export class InMemoryDbStore {
             const settings = store.printSettings.get(job.id);
             const printer = store.printers.get(job.printerId);
             const assetVersion = store.assetVersions.get(job.assetVersionId);
-            const quotes = Array.from(store.priceQuotes.values()).filter((q) => q.printJobId === job.id);
+            const quotes = Array.from(store.priceQuotes.values())
+            .filter((q) => q.printJobId === job.id)
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
             return {
               ...job,
               settings,

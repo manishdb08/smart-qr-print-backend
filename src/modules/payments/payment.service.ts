@@ -10,6 +10,7 @@ import { recordAuditEvent } from '../../middleware/audit.js';
 import { config } from '../../config/index.js';
 import { AuthenticatedUser } from '../../types/index.js';
 import { VerifyPaymentInput } from './payment.types.js';
+import { calculateJobQuote } from '../print-jobs/printJob.service.js';
 
 export async function createPaymentOrder(
   printJobId: string,
@@ -38,7 +39,23 @@ export async function createPaymentOrder(
     throw error;
   }
 
-  const quote = job.priceQuotes[0];
+  let quote = job.priceQuotes[0];
+  if (!quote) {
+    // Automatically generate quote on the fly if not explicitly requested prior to payment
+    try {
+      const quotedJob = await calculateJobQuote(printJobId, currentUser);
+      if (quotedJob.quote) {
+        quote = {
+          totalAmountPaise: quotedJob.quote.totalAmountPaise,
+          currency: quotedJob.quote.currency,
+          expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+        } as any;
+      }
+    } catch {
+      // Non-fatal fallback to error below
+    }
+  }
+
   if (!quote) {
     const error = new Error('No pricing quote found for this print job. Please request a quote first via POST /print-jobs/:id/quote.');
     (error as unknown as { statusCode: number }).statusCode = 400;

@@ -517,6 +517,11 @@
     async function updatePriceQuote() {
       if (!uploadedVersionId) return;
 
+      const btnPay = document.getElementById('btnProceedToPay');
+      if (btnPay) btnPay.disabled = true;
+      priceDisplay.textContent = 'Calculating...';
+      paiseDisplay.textContent = 'fetching quote';
+
       try {
         // Create or update draft job
         const draftRes = await fetch(`${API_BASE}/print-jobs`, {
@@ -535,6 +540,8 @@
           })
         });
         const draftJson = await draftRes.json();
+        if (!draftJson.success) throw new Error(draftJson.error?.message || 'Could not create print job');
+
         currentJobId = draftJson.data.id;
         currentShortCode = draftJson.data.shortCode;
 
@@ -544,19 +551,38 @@
           headers: { 'Authorization': 'Bearer test-token-customer' }
         });
         const quoteJson = await quoteRes.json();
+        if (!quoteJson.success) throw new Error(quoteJson.error?.message || 'Could not calculate quote');
+
         const totalPaise = quoteJson.data.totalAmountPaise;
 
         priceDisplay.textContent = `₹${(totalPaise / 100).toFixed(2)}`;
         paiseDisplay.textContent = `${totalPaise} paise`;
         quoteDetails.textContent = `${pageCount} page(s) • ${copies} copy • ${isColor ? 'Color' : 'Mono'}${isDuplex ? ' (Duplex -10%)' : ''}`;
+        if (btnPay) btnPay.disabled = false;
       } catch (err) {
         console.error('Quote error:', err);
+        priceDisplay.textContent = '₹0.00';
+        paiseDisplay.textContent = 'Error calculating quote';
+        if (btnPay) btnPay.disabled = false;
       }
     }
 
     // Step 3 -> Step 4: Pay & Print
     document.getElementById('btnProceedToPay').onclick = async () => {
+      const btn = document.getElementById('btnProceedToPay');
+      const originalText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `<span class="inline-block animate-spin mr-2">⏳</span> Initializing Payment...`;
+
       try {
+        if (!currentJobId) {
+          await updatePriceQuote();
+        }
+
+        if (!currentJobId) {
+          throw new Error('Please configure your document options first.');
+        }
+
         // 1. Create Razorpay Order
         const orderRes = await fetch(`${API_BASE}/payments/razorpay/orders`, {
           method: 'POST',
@@ -572,7 +598,7 @@
         const { orderId, amountPaise, keyId } = orderJson.data;
 
         // 2. Open Razorpay Checkout or Mock Test Fallback
-        if (keyId.includes('YourTestKeyId') || keyId.includes('mock')) {
+        if (!keyId || keyId.includes('YourTestKeyId') || keyId.includes('mock') || keyId.includes('test')) {
           // Dev Mock Instant Payment
           await verifySimulatedPayment(orderId);
         } else {
@@ -594,6 +620,9 @@
         }
       } catch (err) {
         alert('Payment initiation failed: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
       }
     };
 
