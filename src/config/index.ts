@@ -41,8 +41,9 @@ const envSchema = z.object({
   QR_SESSION_TTL_MINUTES: z.coerce.number().default(15),
 
   // File Upload Limits
-  MAX_FILE_SIZE_BYTES: z.coerce.number().default(50 * 1024 * 1024), // 50MB
-  ALLOWED_MIME_TYPES: z.string().default('application/pdf,image/png,image/jpeg,image/webp'),
+  MAX_FILE_SIZE_BYTES: z.coerce.number().default(25 * 1024 * 1024), // 25MB
+  MAX_PDF_PAGES: z.coerce.number().default(150),
+  ALLOWED_MIME_TYPES: z.string().default('application/pdf,image/jpeg,image/png,image/webp'),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

@@ -1,6 +1,15 @@
 import { FastifyInstance } from 'fastify';
-import { presignUploadSchema, completeUploadSchema } from './upload.types.js';
-import { createPresignedUpload, completeUpload } from './upload.service.js';
+import {
+  presignUploadSchema,
+  completeUploadParamSchema,
+  completeUploadBodySchema,
+} from './upload.types.js';
+import {
+  createPresignedUpload,
+  completeUploadSession,
+  completeUpload,
+  cleanupAbandonedUploadSessions,
+} from './upload.service.js';
 import { authenticateUser } from '../../auth/rbac.js';
 import { getStorageProvider } from '../../storage/index.js';
 
@@ -9,22 +18,35 @@ export async function uploadRoutes(fastify: FastifyInstance) {
   fastify.post(
     '/uploads/presign',
     {
+      config: {
+        rateLimit: {
+          max: 30,
+          timeWindow: '1 minute',
+        },
+      },
       schema: {
-        description: 'Generate a short-lived signed upload URL for document upload.',
+        description: 'Generate a short-lived signed upload URL, uploadSessionId, and assetId for secure document upload.',
         tags: ['Uploads'],
         security: [{ bearerAuth: [] }],
         body: {
           type: 'object',
-          required: ['originalFileName', 'mimeType', 'fileSizeBytes'],
           properties: {
-            originalFileName: { type: 'string', description: 'Name of the file including extension' },
-            mimeType: {
+            filename: { type: 'string', description: 'Name of the file including extension' },
+            originalFileName: { type: 'string', description: 'Alternative field for file name' },
+            declaredMimeType: {
               type: 'string',
               enum: ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'],
               description: 'MIME type of the document or image',
             },
-            fileSizeBytes: { type: 'integer', description: 'Declared size in bytes (max 50MB)' },
+            mimeType: {
+              type: 'string',
+              enum: ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'],
+              description: 'Alternative field for MIME type',
+            },
+            sizeBytes: { type: 'integer', description: 'Declared size in bytes (max 25MB)' },
+            fileSizeBytes: { type: 'integer', description: 'Alternative field for size in bytes' },
             qrSessionToken: { type: 'string', description: 'Optional QR session token if scanning at kiosk' },
+            idempotencyKey: { type: 'string', description: 'Optional client idempotency key' },
           },
         },
         response: {
@@ -36,6 +58,8 @@ export async function uploadRoutes(fastify: FastifyInstance) {
                 type: 'object',
                 properties: {
                   uploadUrl: { type: 'string' },
+                  uploadSessionId: { type: 'string' },
+                  assetId: { type: 'string' },
                   storageKey: { type: 'string' },
                   expiresAt: { type: 'string' },
                   maxSizeBytes: { type: 'number' },
@@ -54,10 +78,14 @@ export async function uploadRoutes(fastify: FastifyInstance) {
 
       const result = await createPresignedUpload({
         userId,
+        filename: parsed.filename,
         originalFileName: parsed.originalFileName,
+        declaredMimeType: parsed.declaredMimeType,
         mimeType: parsed.mimeType,
+        sizeBytes: parsed.sizeBytes,
         fileSizeBytes: parsed.fileSizeBytes,
         qrSessionToken: parsed.qrSessionToken,
+        idempotencyKey: parsed.idempotencyKey,
       });
 
       return reply.send({
@@ -67,68 +95,84 @@ export async function uploadRoutes(fastify: FastifyInstance) {
     }
   );
 
-  // 2. Complete Upload & Asynchronous Verification
+  // 2. Complete Upload Session (Primary Milestone 2 Endpoint)
   fastify.post(
-    '/uploads/complete',
+    '/uploads/:uploadSessionId/complete',
     {
+      config: {
+        rateLimit: {
+          max: 30,
+          timeWindow: '1 minute',
+        },
+      },
+      preValidation: async (request) => {
+        if (!request.body) {
+          request.body = {};
+        }
+      },
       schema: {
-        description: 'Finalize document upload, verifying magic bytes, SHA-256 checksum, page count, and malware scans.',
+        description: 'Marks an upload complete, validates file, creates immutable asset version, and returns status.',
         tags: ['Uploads'],
         security: [{ bearerAuth: [] }],
-        body: {
+        params: {
           type: 'object',
-          required: ['storageKey', 'originalFileName', 'mimeType'],
+          required: ['uploadSessionId'],
           properties: {
-            storageKey: { type: 'string', description: 'Key where the file was uploaded in object storage' },
-            originalFileName: { type: 'string', description: 'Original file name' },
-            mimeType: { type: 'string', description: 'Declared MIME type' },
-            qrSessionToken: { type: 'string', description: 'Optional QR session token' },
-          },
-        },
-        response: {
-          201: {
-            type: 'object',
-            properties: {
-              success: { type: 'boolean' },
-              data: {
-                type: 'object',
-                properties: {
-                  assetId: { type: 'string' },
-                  originalFileName: { type: 'string' },
-                  mimeType: { type: 'string' },
-                  pageCount: { type: 'number' },
-                  fileSizeBytes: { type: 'number' },
-                  checksumSha256: { type: 'string' },
-                  isImmutableOriginal: { type: 'boolean' },
-                  activeVersion: {
-                    type: 'object',
-                    properties: {
-                      id: { type: 'string' },
-                      versionNumber: { type: 'number' },
-                      derivationType: { type: 'string' },
-                      pageCount: { type: 'number' },
-                      fileSizeBytes: { type: 'number' },
-                      checksumSha256: { type: 'string' },
-                      previewUrl: { type: 'string' },
-                    },
-                  },
-                },
-              },
-            },
+            uploadSessionId: { type: 'string', description: 'UUID of the upload session' },
           },
         },
       },
       preHandler: [authenticateUser(false)],
     },
     async (request, reply) => {
-      const parsed = completeUploadSchema.parse(request.body);
+      const { uploadSessionId } = completeUploadParamSchema.parse(request.params);
+      const body = (request.body as { idempotencyKey?: string }) || {};
+      const userId = request.user!.id;
+
+      const result = await completeUploadSession({
+        uploadSessionId,
+        userId,
+        idempotencyKey: body.idempotencyKey,
+        ipAddress: request.ip,
+        userAgent: request.headers['user-agent'],
+      });
+
+      return reply.status(200).send({
+        success: true,
+        data: result,
+      });
+    }
+  );
+
+  // 3. Complete Upload (Backward Compatible for existing tests and clients)
+  fastify.post(
+    '/uploads/complete',
+    {
+      config: {
+        rateLimit: {
+          max: 30,
+          timeWindow: '1 minute',
+        },
+      },
+      schema: {
+        description: 'Legacy endpoint: finalize document upload by storageKey or uploadSessionId.',
+        tags: ['Uploads'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: [authenticateUser(false)],
+    },
+    async (request, reply) => {
+      const parsed = completeUploadBodySchema.parse(request.body);
       const userId = request.user!.id;
 
       const result = await completeUpload({
         userId,
+        uploadSessionId: parsed.uploadSessionId,
         storageKey: parsed.storageKey,
         originalFileName: parsed.originalFileName,
-        declaredMimeType: parsed.mimeType,
+        filename: parsed.filename,
+        declaredMimeType: parsed.declaredMimeType,
+        mimeType: parsed.mimeType,
         ipAddress: request.ip,
         userAgent: request.headers['user-agent'],
       });
@@ -140,7 +184,27 @@ export async function uploadRoutes(fastify: FastifyInstance) {
     }
   );
 
-  // 3. Mock Storage Upload (Dev / Local Testing)
+  // 4. Trigger Cleanup of Abandoned Upload Sessions (Admin/System only)
+  fastify.post(
+    '/uploads/cleanup-stale',
+    {
+      schema: {
+        description: 'Clean up abandoned upload sessions and expired upload URLs.',
+        tags: ['Uploads'],
+        security: [{ bearerAuth: [] }],
+      },
+      preHandler: [authenticateUser(true)], // Admin only
+    },
+    async (_request, reply) => {
+      const result = await cleanupAbandonedUploadSessions();
+      return reply.send({
+        success: true,
+        data: result,
+      });
+    }
+  );
+
+  // 5. Mock Storage Upload (Dev / Local Testing)
   fastify.put(
     '/mock-storage/upload',
     async (request, reply) => {
@@ -153,7 +217,7 @@ export async function uploadRoutes(fastify: FastifyInstance) {
     }
   );
 
-  // 4. Mock Storage Download (Dev / Local Testing)
+  // 6. Mock Storage Download (Dev / Local Testing)
   fastify.get(
     '/mock-storage/download',
     async (request, reply) => {

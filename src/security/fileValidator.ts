@@ -11,6 +11,8 @@ export interface FileValidationResult {
   checksumSha256: string;
   fileSizeBytes: number;
   pageCount: number;
+  width?: number;
+  height?: number;
   metadata: Record<string, unknown>;
 }
 
@@ -127,10 +129,27 @@ export async function validateAndInspectFile(
         throw new Error('PDF document contains no renderable pages.');
       }
 
+      if (pageCount > config.MAX_PDF_PAGES) {
+        const err = new Error(
+          `PDF page count (${pageCount}) exceeds maximum allowable limit of ${config.MAX_PDF_PAGES} pages.`
+        );
+        (err as unknown as { statusCode: number }).statusCode = 422;
+        throw err;
+      }
+
       metadata.pageCount = pageCount;
+      try {
+        const firstPage = pdfDoc.getPage(0);
+        const size = firstPage.getSize();
+        metadata.width = Math.round(size.width);
+        metadata.height = Math.round(size.height);
+      } catch {
+        // Non-fatal if page geometry cannot be extracted
+      }
       metadata.pdfTitle = pdfDoc.getTitle() ?? undefined;
       metadata.pdfAuthor = pdfDoc.getAuthor() ?? undefined;
     } catch (pdfErr) {
+      if ((pdfErr as any)?.statusCode) throw pdfErr;
       const msg = pdfErr instanceof Error ? pdfErr.message : String(pdfErr);
       const isEncrypted = msg.toLowerCase().includes('encrypt') || msg.toLowerCase().includes('password');
       const err = new Error(
@@ -165,6 +184,8 @@ export async function validateAndInspectFile(
     checksumSha256,
     fileSizeBytes,
     pageCount,
+    width: typeof metadata.width === 'number' ? metadata.width : undefined,
+    height: typeof metadata.height === 'number' ? metadata.height : undefined,
     metadata,
   };
 }

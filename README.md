@@ -102,6 +102,38 @@ smart-qr-print-backend/
 
 ---
 
+## 📦 Milestone 2: Secure Uploads, Storage & Document Versioning
+
+### 1. Document Assets & Storage Architecture
+- **StorageService Interface**: Abstracted interface (`StorageService` / `StorageProvider`) supporting Supabase Storage for production and in-memory `LocalStorageProvider` for hermetic testing.
+- **Short-Lived Signed URLs Only**: Object storage buckets remain private. The API never returns or exposes permanent public file URLs; all uploads and downloads use time-limited (15-minute) cryptographic signed URLs.
+- **Generated Object Keys**: Only server-generated keys formatted as `uploads/:userId/:assetId/:sanitizedFilename` are persisted. Client filesystem paths or path-traversal sequences (`..`, `/`) are strictly sanitized.
+
+### 2. File Format & Inspection Limits
+- **Permitted MIME Types**: `application/pdf`, `image/jpeg`, `image/png`, `image/webp`.
+- **Maximum File Size**: 25 MB (`MAX_FILE_SIZE_BYTES=26214400`).
+- **Maximum PDF Pages**: 150 pages (`MAX_PDF_PAGES=150`).
+- **Content Verification**: Magic-byte inspection, file corruption detection, password-protected/encrypted PDF rejection, and SHA-256 checksum generation.
+- **Malware Scanner**: Pluggable `MalwareScanner` interface with clearly documented `NoOpDevMalwareScanner` for development and automated tests (which explicitly disclaims real malware protection), and `SignatureMalwareScanner` for signature validation.
+
+### 3. API Endpoints
+| Method | Path | Description | Access |
+|---|---|---|---|
+| `POST` | `/v1/uploads/presign` | Generates short-lived signed upload URL, `uploadSessionId`, and `assetId` | Authenticated User |
+| `POST` | `/v1/uploads/:uploadSessionId/complete` | Finalizes upload, transitions status through `uploaded` → `validating` → `ready`, and queues BullMQ validation | Owner |
+| `GET` | `/v1/assets/:assetId` | Fetches document asset metadata, page count, and status | Owner / Admin |
+| `GET` | `/v1/assets/:assetId/versions` | Lists all immutable versions associated with an asset | Owner / Admin |
+| `POST` | `/v1/assets/:assetId/download-url` | Generates a short-lived signed download URL | Owner / Admin / Operator |
+| `DELETE` | `/v1/assets/:assetId` | Soft-deletes the asset (`isDeleted: true`). Preserves all historical audit evidence | Owner / Admin |
+
+### 4. Immutability & Audit Logging
+- Original uploaded documents are flagged with `isImmutableOriginal: true` and cannot be overwritten.
+- Derivations (crop, edit, enhancement) generate linked `AssetVersion` records with version numbers and derivation lineage.
+- Audit events recorded: `UPLOAD_CREATED`, `UPLOAD_COMPLETED`, `VALIDATION_PASSED`, `VALIDATION_FAILED`, `DOWNLOAD_REQUESTED`, `DELETION_REQUESTED`.
+- Stale and abandoned upload sessions are expired via `cleanupAbandonedUploadSessions()`.
+
+---
+
 ## 🚀 Getting Started
 
 ### 1. Prerequisites
@@ -202,9 +234,9 @@ The test suite runs using Vitest and tests the full HTTP request/response cycle,
 npm test
 ```
 
-### Test Suite Coverage (75 Automated Integration Tests):
+### Test Suite Coverage (80 Automated Integration Tests):
 - **Milestone 1**: Database, Auth, Probes, Seeded Printers, Hardware Capabilities, Short-lived HMAC QR Sessions, RBAC.
-- **Milestone 2**: Presigned Uploads, Magic Bytes Validation, SHA-256 Checksum, Page Count Extraction, Malware Quarantine, Asset Versioning & Derivation.
+- **Milestone 2**: Presigned Uploads, Magic Bytes Validation, SHA-256 Checksum, Page Count Extraction, Malware Quarantine, Asset Versioning & Derivation, Short-Lived Download URLs, Soft Deletion, Idempotency.
 - **Milestone 3**: AI Processing Queue, Gemini Document Understanding, OCR, Translation, Natural Language to Strict JSON, Prompt-Injection Protection, Deterministic PDF/Image Operations, Preview & Approval/Rejection Workflow.
 - **Milestone 4**: Server-side Pricing Engine, Price Tampering Prevention, Integer Paise Enforcement, Razorpay Order Generation, HMAC Payment Signature Verification, Raw Body Webhook Verification, Webhook Replay Idempotency, Refund Handling, Payment Reconciliation.
 - **Milestone 5**: Hardware Printer Agent Polling & Claiming, Only Paid/Approved Job Dispatch, Short-lived Signed Print Package URLs, Hardware Status Reporting Progression, Hardware Failure Tracking & Retry Policy, Cross-Printer Isolation, Offline Printer Detection.

@@ -6,6 +6,7 @@ export class InMemoryDbStore {
   users: Map<string, any> = new Map();
   qrSessions: Map<string, any> = new Map();
   documentAssets: Map<string, any> = new Map();
+  uploadSessions: Map<string, any> = new Map();
   assetVersions: Map<string, any> = new Map();
   aiTransformations: Map<string, any> = new Map();
   printJobs: Map<string, any> = new Map();
@@ -208,13 +209,22 @@ export class InMemoryDbStore {
       documentAsset: {
         create: async (args: any) => {
           const id = args.data.id || crypto.randomUUID();
-          const asset = { id, ...args.data, createdAt: new Date(), updatedAt: new Date() };
+          const asset = {
+            id,
+            status: args.data.status || 'pending_upload',
+            isDeleted: args.data.isDeleted ?? false,
+            deletedAt: args.data.deletedAt ?? null,
+            ...args.data,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
           store.documentAssets.set(id, asset);
           return asset;
         },
         findUnique: async (args: any) => {
           const a = store.documentAssets.get(args.where.id);
           if (!a) return null;
+          if (args.where?.isDeleted !== undefined && a.isDeleted !== args.where.isDeleted) return null;
           const versions = Array.from(store.assetVersions.values()).filter((v) => v.assetId === a.id);
           return {
             ...a,
@@ -222,16 +232,126 @@ export class InMemoryDbStore {
             _count: { versions: versions.length },
           };
         },
+        findFirst: async (args: any) => {
+          for (const a of store.documentAssets.values()) {
+            if (args.where?.id && a.id !== args.where.id) continue;
+            if (args.where?.userId && a.userId !== args.where.userId) continue;
+            if (args.where?.storageKey && a.storageKey !== args.where.storageKey) continue;
+            if (args.where?.isDeleted !== undefined && a.isDeleted !== args.where.isDeleted) continue;
+            const versions = Array.from(store.assetVersions.values()).filter((v) => v.assetId === a.id);
+            return {
+              ...a,
+              versions,
+              _count: { versions: versions.length },
+            };
+          }
+          return null;
+        },
+        findMany: async (args: any) => {
+          let list = Array.from(store.documentAssets.values());
+          if (args?.where?.userId) list = list.filter((a) => a.userId === args.where.userId);
+          if (args?.where?.isDeleted !== undefined) list = list.filter((a) => a.isDeleted === args.where.isDeleted);
+          if (args?.where?.status) list = list.filter((a) => a.status === args.where.status);
+          return list;
+        },
+        update: async (args: any) => {
+          const a = store.documentAssets.get(args.where.id);
+          if (!a) throw new Error('DocumentAsset not found');
+          Object.assign(a, args.data, { updatedAt: new Date() });
+          return a;
+        },
+      },
+      uploadSession: {
+        create: async (args: any) => {
+          const id = args.data.id || crypto.randomUUID();
+          const session = {
+            id,
+            status: args.data.status || 'pending',
+            ...args.data,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+          store.uploadSessions.set(id, session);
+          return session;
+        },
+        findUnique: async (args: any) => {
+          let s = args.where?.id ? store.uploadSessions.get(args.where.id) : null;
+          if (!s && args.where?.storageKey) {
+            for (const sess of store.uploadSessions.values()) {
+              if (sess.storageKey === args.where.storageKey) {
+                s = sess;
+                break;
+              }
+            }
+          }
+          if (!s && args.where?.idempotencyKey) {
+            for (const sess of store.uploadSessions.values()) {
+              if (sess.idempotencyKey === args.where.idempotencyKey) {
+                s = sess;
+                break;
+              }
+            }
+          }
+          if (!s) return null;
+          const asset = store.documentAssets.get(s.assetId);
+          return {
+            ...s,
+            asset,
+          };
+        },
+        findFirst: async (args: any) => {
+          for (const s of store.uploadSessions.values()) {
+            if (args.where?.id && s.id !== args.where.id) continue;
+            if (args.where?.assetId && s.assetId !== args.where.assetId) continue;
+            if (args.where?.userId && s.userId !== args.where.userId) continue;
+            if (args.where?.storageKey && s.storageKey !== args.where.storageKey) continue;
+            if (args.where?.idempotencyKey && s.idempotencyKey !== args.where.idempotencyKey) continue;
+            const asset = store.documentAssets.get(s.assetId);
+            return {
+              ...s,
+              asset,
+            };
+          }
+          return null;
+        },
+        findMany: async (args: any) => {
+          let list = Array.from(store.uploadSessions.values());
+          if (args?.where?.status) {
+            list = list.filter((s) => s.status === args.where.status);
+          }
+          if (args?.where?.expiresAt?.lt) {
+            list = list.filter((s) => s.expiresAt < args.where.expiresAt.lt);
+          }
+          return list;
+        },
+        update: async (args: any) => {
+          const s = store.uploadSessions.get(args.where.id);
+          if (!s) throw new Error('UploadSession not found');
+          Object.assign(s, args.data, { updatedAt: new Date() });
+          return s;
+        },
+        deleteMany: async () => ({ count: 0 }),
       },
       assetVersion: {
         create: async (args: any) => {
           const id = args.data.id || crypto.randomUUID();
-          const version = { id, ...args.data, createdAt: new Date() };
+          const version = {
+            id,
+            status: args.data.status || 'ready',
+            ...args.data,
+            createdAt: new Date(),
+          };
           store.assetVersions.set(id, version);
           return version;
         },
         findMany: async (args: any) => {
-          return Array.from(store.assetVersions.values()).filter((v) => v.assetId === args.where.assetId);
+          let list = Array.from(store.assetVersions.values()).filter((v) => v.assetId === args.where.assetId);
+          if (args?.orderBy?.versionNumber === 'desc') {
+            list.sort((a, b) => b.versionNumber - a.versionNumber);
+          } else {
+            list.sort((a, b) => a.versionNumber - b.versionNumber);
+          }
+          return list;
         },
         findUnique: async (args: any) => {
           const v = store.assetVersions.get(args.where.id);
@@ -241,6 +361,12 @@ export class InMemoryDbStore {
             ...v,
             asset,
           };
+        },
+        update: async (args: any) => {
+          const v = store.assetVersions.get(args.where.id);
+          if (!v) throw new Error('AssetVersion not found');
+          Object.assign(v, args.data);
+          return v;
         },
       },
       aiTransformation: {
@@ -429,6 +555,14 @@ export class InMemoryDbStore {
           const evt = { id, ...args.data, createdAt: new Date() };
           store.auditEvents.set(id, evt);
           return evt;
+        },
+        findMany: async (args: any) => {
+          let list = Array.from(store.auditEvents.values());
+          if (args?.where?.entityId) list = list.filter((e) => e.entityId === args.where.entityId);
+          if (args?.where?.entityType) list = list.filter((e) => e.entityType === args.where.entityType);
+          if (args?.where?.userId) list = list.filter((e) => e.userId === args.where.userId);
+          if (args?.where?.action) list = list.filter((e) => e.action === args.where.action);
+          return list;
         },
       },
       $transaction: async (fnOrArray: any) => {

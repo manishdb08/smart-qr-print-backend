@@ -97,6 +97,22 @@ enum ActorType {
   system
 }
 
+enum AssetStatus {
+  pending_upload
+  uploaded
+  validating
+  ready
+  rejected
+  malware_suspected
+}
+
+enum UploadSessionStatus {
+  pending
+  completed
+  expired
+  cancelled
+}
+
 // -----------------------------------------------------------------------------
 // MODELS
 // -----------------------------------------------------------------------------
@@ -111,6 +127,7 @@ model User {
   updatedAt    DateTime        @updatedAt
 
   documentAssets DocumentAsset[]
+  uploadSessions UploadSession[]
   printJobs      PrintJob[]
   auditEvents    AuditEvent[]
   qrSessions     QrSession[]
@@ -175,20 +192,50 @@ model DocumentAsset {
   userId              String
   originalFileName    String
   mimeType            String
-  checksumSha256      String
-  fileSizeBytes       Int
-  pageCount           Int
+  checksumSha256      String?
+  fileSizeBytes       Int?
+  pageCount           Int?
+  width               Int?
+  height              Int?
   storageKey          String             @unique
+  status              AssetStatus        @default(pending_upload)
   isImmutableOriginal Boolean            @default(true)
+  isDeleted           Boolean            @default(false)
+  deletedAt           DateTime?
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 
   user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   versions            AssetVersion[]
   transformations     AiTransformation[]
+  uploadSessions      UploadSession[]
 
   @@index([userId])
   @@index([checksumSha256])
+  @@index([status])
+  @@index([isDeleted])
+}
+
+model UploadSession {
+  id               String              @id @default(uuid())
+  assetId          String
+  userId           String
+  storageKey       String              @unique
+  declaredMimeType String
+  sizeBytes        Int
+  status           UploadSessionStatus @default(pending)
+  idempotencyKey   String?             @unique
+  expiresAt        DateTime
+  completedAt      DateTime?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  asset            DocumentAsset       @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([assetId])
+  @@index([userId])
+  @@index([status, expiresAt])
 }
 
 model AssetVersion {
@@ -196,12 +243,18 @@ model AssetVersion {
   assetId               String
   versionNumber         Int                @default(1)
   derivationType        String             // "original", "crop", "translate", "enhance_image", etc.
+  operationType         String?            // "upload", "crop", "grayscale", etc.
+  sourceVersionId       String?
   fileSizeBytes         Int
   pageCount             Int
+  width                 Int?
+  height                Int?
   storageKey            String             @unique
   previewStorageKey     String?
   checksumSha256        String
+  status                String             @default("ready")
   isApproved            Boolean            @default(false)
+  createdById           String?
   metadata              Json?
   createdAt             DateTime           @default(now())
 
